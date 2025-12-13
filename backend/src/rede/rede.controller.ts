@@ -7,6 +7,8 @@ import {
   SimularAtaqueDto,
   StatusDispositivo,
   StatusConexao,
+  AtualizarPesosDto,
+  SimularQuedaEnergiaDto,
 } from './types';
 
 @Controller('api/rede')
@@ -184,6 +186,77 @@ export class RedeController {
   resetarRede() {
     this.redeService.resetarRede();
     return { sucesso: true, mensagem: 'Rede resetada com sucesso!' };
+  }
+
+  // ============================================
+  // NOVOS ENDPOINTS - REQUISITOS COMPLETOS
+  // ============================================
+
+  @Put('conexoes/:id/pesos')
+  atualizarPesos(@Param('id') id: string, @Body() dto: Omit<AtualizarPesosDto, 'conexaoId'>) {
+    return this.redeService.atualizarPesosConexao({ conexaoId: id, ...dto });
+  }
+
+  @Post('broadcast/:id')
+  simularBroadcast(@Param('id') id: string) {
+    return this.redeService.simularBroadcast(id);
+  }
+
+  @Get('caminho/banda')
+  buscarRotaPorBanda(
+    @Query('origem') origem: string,
+    @Query('destino') destino: string,
+  ) {
+    return this.redeService.buscarRotaPorBanda(origem, destino);
+  }
+
+  @Get('caminho/alternativas')
+  recomendarRotasAlternativas(
+    @Query('origem') origem: string,
+    @Query('destino') destino: string,
+  ) {
+    return this.redeService.recomendarRotasAlternativas(origem, destino);
+  }
+
+  @Post('falhas/queda-energia')
+  simularQuedaEnergia(@Body() dto: SimularQuedaEnergiaDto) {
+    return this.redeService.simularQuedaEnergia(dto.dispositivos);
+  }
+
+  @Get('snapshot/antes-falha')
+  getSnapshotAntesFalha() {
+    return this.redeService.getSnapshotAntesFalha();
+  }
+
+  @Get('snapshot/comparar')
+  compararAntesDepois() {
+    return this.redeService.compararAntesDepois();
+  }
+
+  @Post('ataques/:id/propagar')
+  propagarMalware(@Param('id') id: string) {
+    return { novosInfectados: this.redeService.propagarMalware(id) };
+  }
+
+  @Get('historico')
+  getHistorico() {
+    return this.redeService.getHistorico();
+  }
+
+  @Get('estatisticas')
+  getEstatisticasHistoricas() {
+    return this.redeService.getEstatisticasHistoricas();
+  }
+
+  @Post('historico/snapshot')
+  salvarSnapshot() {
+    this.redeService.salvarSnapshot();
+    return { sucesso: true, mensagem: 'Snapshot salvo!' };
+  }
+
+  @Get('caminho-medio')
+  getCaminhoMedio() {
+    return { caminhoMedio: this.redeService.calcularCaminhoMedio() };
   }
 }
 

@@ -18,6 +18,10 @@ import {
   CriarConexaoDto,
   EnviarPacoteDto,
   SimularAtaqueDto,
+  HistoricoRede,
+  RecomendacaoRota,
+  SimulacaoBroadcast,
+  AtualizarPesosDto,
 } from './types';
 import { dispositivosSeed, conexoesSeedDef, logsIniciais } from './seed';
 
@@ -213,6 +217,10 @@ export class RedeService {
   private pacotesEntregues = 0;
   private pacotesPerdidos = 0;
 
+  // Histórico da rede
+  private historicoRede: HistoricoRede[] = [];
+  private snapshotAntesFalha: { nodes: Dispositivo[]; edges: Conexao[] } | null = null;
+
   constructor() {
     this.inicializarRedeDemostracao();
   }
@@ -381,6 +389,9 @@ export class RedeService {
       bandaUsada: 0,
       perda: 0,
       peso: 0,
+      custo: dto.custo || 1,
+      estabilidade: dto.estabilidade || 100,
+      probabilidadeFalha: dto.probabilidadeFalha || 0,
       bidirecional: dto.bidirecional ?? true,
       criadoEm: new Date(),
       atualizadoEm: new Date(),
@@ -881,6 +892,10 @@ export class RedeService {
 
     const congestionamentos = conexoes.filter((c) => c.bandaUsada / c.banda > 0.8).length;
 
+    const dispositivosComprometidos = dispositivos.filter(
+      d => d.status === StatusDispositivo.COMPROMETIDO
+    ).length;
+
     return {
       totalDispositivos: dispositivos.length,
       dispositivosOnline,
@@ -894,6 +909,9 @@ export class RedeService {
       throughputTotal,
       congestionamentos,
       tempoMedioRota: 0,
+      caminhoMedioEntreNos: this.calcularCaminhoMedio(),
+      dispositivosComprometidos,
+      ataquesAtivos: this.ataques.size,
     };
   }
 
@@ -901,6 +919,398 @@ export class RedeService {
     return this.getTodasConexoes()
       .filter((c) => c.bandaUsada / c.banda > 0.8)
       .sort((a, b) => b.bandaUsada / b.banda - a.bandaUsada / a.banda);
+  }
+
+  // ============================================
+  // ATUALIZAÇÃO DE PESOS
+  // ============================================
+
+  atualizarPesosConexao(dto: AtualizarPesosDto): Conexao | null {
+    const conexao = this.conexoes.get(dto.conexaoId);
+    if (!conexao) return null;
+
+    if (dto.latencia !== undefined) conexao.latencia = dto.latencia;
+    if (dto.banda !== undefined) conexao.banda = dto.banda;
+    if (dto.custo !== undefined) conexao.custo = dto.custo;
+    if (dto.probabilidadeFalha !== undefined) conexao.probabilidadeFalha = dto.probabilidadeFalha;
+
+    conexao.peso = this.calcularPesoConexao(conexao);
+    conexao.atualizadoEm = new Date();
+
+    this.adicionarLog('INFO', `Pesos da conexão atualizados`, [conexao.origem, conexao.destino]);
+    return conexao;
+  }
+
+  // ============================================
+  // BROADCAST E ALCANCE
+  // ============================================
+
+  simularBroadcast(origemId: string): SimulacaoBroadcast {
+    const origem = this.vertices.get(origemId);
+    if (!origem) {
+      return { origem: origemId, alcance: [], tempoTotal: 0, saltoMaximo: 0 };
+    }
+
+    const visitados = new Set<string>();
+    const distancias = new Map<string, number>();
+    const fila: { id: string; distancia: number; latencia: number }[] = [
+      { id: origemId, distancia: 0, latencia: 0 }
+    ];
+    
+    visitados.add(origemId);
+    distancias.set(origemId, 0);
+    let tempoTotal = 0;
+    let saltoMaximo = 0;
+
+    while (fila.length > 0) {
+      const atual = fila.shift()!;
+      saltoMaximo = Math.max(saltoMaximo, atual.distancia);
+
+      const lista = this.adjacencias.get(atual.id);
+      if (lista) {
+        for (const vizinho of lista.todosVizinhos()) {
+          const dispositivo = this.vertices.get(vizinho.destinoId);
+          if (
+            !visitados.has(vizinho.destinoId) &&
+            dispositivo?.status === StatusDispositivo.ONLINE &&
+            vizinho.conexao.status === StatusConexao.ATIVA
+          ) {
+            visitados.add(vizinho.destinoId);
+            const novaLatencia = atual.latencia + vizinho.conexao.latencia;
+            tempoTotal = Math.max(tempoTotal, novaLatencia);
+            fila.push({ 
+              id: vizinho.destinoId, 
+              distancia: atual.distancia + 1,
+              latencia: novaLatencia
+            });
+          }
+        }
+      }
+    }
+
+    const alcance = Array.from(visitados);
+    this.adicionarLog('INFO', `Broadcast de ${origem.nome}: ${alcance.length} dispositivos alcançados`, alcance);
+
+    return {
+      origem: origemId,
+      alcance,
+      tempoTotal,
+      saltoMaximo,
+    };
+  }
+
+  // ============================================
+  // ROTA POR MAIOR BANDA
+  // ============================================
+
+  buscarRotaPorBanda(origemId: string, destinoId: string): ResultadoCaminho {
+    if (!this.vertices.has(origemId) || !this.vertices.has(destinoId)) {
+      return this.resultadoNaoEncontrado('DIJKSTRA');
+    }
+
+    // Usa Dijkstra modificado para maximizar banda mínima no caminho
+    const bandaMaxima = new Map<string, number>();
+    const predecessores = new Map<string, string>();
+    const heap = new HeapMinimo();
+
+    this.vertices.forEach((_, id) => {
+      bandaMaxima.set(id, id === origemId ? Infinity : 0);
+    });
+
+    heap.inserir(origemId, 0); // Prioridade inversa (menor = melhor banda)
+
+    while (!heap.estaVazio()) {
+      const minimo = heap.extrairMinimo()!;
+      const atualId = minimo.id;
+
+      if (atualId === destinoId) {
+        return this.reconstruirCaminho(origemId, destinoId, predecessores, 'DIJKSTRA');
+      }
+
+      const lista = this.adjacencias.get(atualId);
+      if (lista) {
+        for (const vizinho of lista.todosVizinhos()) {
+          const dispositivo = this.vertices.get(vizinho.destinoId);
+
+          if (
+            dispositivo?.status !== StatusDispositivo.ONLINE ||
+            vizinho.conexao.status !== StatusConexao.ATIVA
+          ) {
+            continue;
+          }
+
+          const bandaDisponivel = vizinho.conexao.banda - vizinho.conexao.bandaUsada;
+          const novaBanda = Math.min(bandaMaxima.get(atualId)!, bandaDisponivel);
+
+          if (novaBanda > bandaMaxima.get(vizinho.destinoId)!) {
+            bandaMaxima.set(vizinho.destinoId, novaBanda);
+            predecessores.set(vizinho.destinoId, atualId);
+
+            // Prioridade inversa: -banda para que maior banda tenha menor prioridade
+            if (heap.contem(vizinho.destinoId)) {
+              heap.diminuirPrioridade(vizinho.destinoId, -novaBanda);
+            } else {
+              heap.inserir(vizinho.destinoId, -novaBanda);
+            }
+          }
+        }
+      }
+    }
+
+    return this.resultadoNaoEncontrado('DIJKSTRA');
+  }
+
+  // ============================================
+  // QUEDA DE ENERGIA EM ÁREA
+  // ============================================
+
+  simularQuedaEnergia(dispositivosIds: string[]): { afetados: string[]; isolados: string[] } {
+    // Salva snapshot antes da falha
+    this.snapshotAntesFalha = this.exportarGrafo();
+
+    const afetados: string[] = [];
+
+    for (const id of dispositivosIds) {
+      const dispositivo = this.vertices.get(id);
+      if (dispositivo && dispositivo.status === StatusDispositivo.ONLINE) {
+        dispositivo.status = StatusDispositivo.OFFLINE;
+        afetados.push(id);
+      }
+    }
+
+    // Detecta isolamentos após queda
+    const componentes = this.componentesConectados();
+    const isolados = componentes
+      .filter(c => c.isolado)
+      .flatMap(c => c.dispositivos);
+
+    this.adicionarLog('ERROR', `⚡ Queda de energia: ${afetados.length} dispositivos afetados`, afetados);
+
+    if (isolados.length > 0) {
+      this.adicionarLog('WARNING', `🔌 ${isolados.length} dispositivos ficaram isolados`, isolados);
+    }
+
+    return { afetados, isolados };
+  }
+
+  // ============================================
+  // ROTAS ALTERNATIVAS
+  // ============================================
+
+  recomendarRotasAlternativas(origemId: string, destinoId: string): RecomendacaoRota {
+    const rotaOriginal = this.dijkstra(origemId, destinoId);
+    const alternativas: ResultadoCaminho[] = [];
+
+    if (!rotaOriginal.encontrado) {
+      return {
+        rotaOriginal: [],
+        rotasAlternativas: [],
+        motivoRecomendacao: 'Não existe rota entre origem e destino',
+      };
+    }
+
+    // Tenta encontrar rotas alternativas bloqueando cada aresta da rota original
+    for (let i = 0; i < rotaOriginal.caminho.length - 1; i++) {
+      const origem = rotaOriginal.caminho[i];
+      const destino = rotaOriginal.caminho[i + 1];
+
+      // Encontra e bloqueia temporariamente a conexão
+      const lista = this.adjacencias.get(origem);
+      if (lista) {
+        const aresta = lista.buscar(destino);
+        if (aresta) {
+          const statusOriginal = aresta.conexao.status;
+          aresta.conexao.status = StatusConexao.INATIVA;
+
+          // Busca rota alternativa
+          const alternativa = this.dijkstra(origemId, destinoId);
+          if (alternativa.encontrado && 
+              JSON.stringify(alternativa.caminho) !== JSON.stringify(rotaOriginal.caminho)) {
+            // Evita duplicatas
+            const existe = alternativas.some(
+              a => JSON.stringify(a.caminho) === JSON.stringify(alternativa.caminho)
+            );
+            if (!existe) {
+              alternativas.push(alternativa);
+            }
+          }
+
+          // Restaura conexão
+          aresta.conexao.status = statusOriginal;
+        }
+      }
+    }
+
+    return {
+      rotaOriginal: rotaOriginal.caminho,
+      rotasAlternativas: alternativas.slice(0, 3), // Máximo 3 alternativas
+      motivoRecomendacao: alternativas.length > 0 
+        ? `${alternativas.length} rotas alternativas encontradas`
+        : 'Não há rotas alternativas disponíveis',
+    };
+  }
+
+  // ============================================
+  // MENOR CAMINHO MÉDIO
+  // ============================================
+
+  calcularCaminhoMedio(): number {
+    const dispositivos = this.getTodosDispositivos().filter(
+      d => d.status === StatusDispositivo.ONLINE
+    );
+    
+    if (dispositivos.length < 2) return 0;
+
+    let somaDistancias = 0;
+    let contagem = 0;
+
+    for (let i = 0; i < dispositivos.length; i++) {
+      for (let j = i + 1; j < dispositivos.length; j++) {
+        const resultado = this.bfs(dispositivos[i].id, dispositivos[j].id);
+        if (resultado.encontrado) {
+          somaDistancias += resultado.saltos;
+          contagem++;
+        }
+      }
+    }
+
+    return contagem > 0 ? somaDistancias / contagem : 0;
+  }
+
+  // ============================================
+  // SNAPSHOT ANTES/DEPOIS
+  // ============================================
+
+  getSnapshotAntesFalha(): { nodes: Dispositivo[]; edges: Conexao[] } | null {
+    return this.snapshotAntesFalha;
+  }
+
+  compararAntesDepois(): { antes: any; depois: any; diferencas: string[] } {
+    const depois = this.exportarGrafo();
+    const diferencas: string[] = [];
+
+    if (!this.snapshotAntesFalha) {
+      return { antes: null, depois, diferencas: ['Nenhum snapshot anterior disponível'] };
+    }
+
+    const antesOnline = this.snapshotAntesFalha.nodes.filter(
+      n => n.status === StatusDispositivo.ONLINE
+    ).length;
+    const depoisOnline = depois.nodes.filter(
+      n => n.status === StatusDispositivo.ONLINE
+    ).length;
+
+    if (antesOnline !== depoisOnline) {
+      diferencas.push(`Dispositivos online: ${antesOnline} → ${depoisOnline}`);
+    }
+
+    const antesAtivas = this.snapshotAntesFalha.edges.filter(
+      e => e.status === StatusConexao.ATIVA
+    ).length;
+    const depoisAtivas = depois.edges.filter(
+      e => e.status === StatusConexao.ATIVA
+    ).length;
+
+    if (antesAtivas !== depoisAtivas) {
+      diferencas.push(`Conexões ativas: ${antesAtivas} → ${depoisAtivas}`);
+    }
+
+    return {
+      antes: this.snapshotAntesFalha,
+      depois,
+      diferencas,
+    };
+  }
+
+  // ============================================
+  // PROPAGAÇÃO DE MALWARE
+  // ============================================
+
+  propagarMalware(ataqueId: string): string[] {
+    const ataque = this.ataques.get(ataqueId);
+    if (!ataque || ataque.tipo !== TipoAtaque.MALWARE || !ataque.ativo) {
+      return [];
+    }
+
+    const novosInfectados: string[] = [];
+
+    for (const alvoId of ataque.alvos) {
+      const lista = this.adjacencias.get(alvoId);
+      if (lista) {
+        for (const vizinho of lista.todosVizinhos()) {
+          const dispositivo = this.vertices.get(vizinho.destinoId);
+          if (
+            dispositivo &&
+            dispositivo.status === StatusDispositivo.ONLINE &&
+            vizinho.conexao.status === StatusConexao.ATIVA &&
+            !ataque.alvos.includes(vizinho.destinoId)
+          ) {
+            // Chance de propagação baseada na intensidade
+            if (Math.random() * 100 < ataque.intensidade) {
+              dispositivo.status = StatusDispositivo.COMPROMETIDO;
+              ataque.alvos.push(vizinho.destinoId);
+              novosInfectados.push(vizinho.destinoId);
+            }
+          }
+        }
+      }
+    }
+
+    if (novosInfectados.length > 0) {
+      this.adicionarLog('ATTACK', `🦠 Malware se propagou para ${novosInfectados.length} novos dispositivos`, novosInfectados);
+    }
+
+    return novosInfectados;
+  }
+
+  // ============================================
+  // HISTÓRICO
+  // ============================================
+
+  salvarSnapshot(): void {
+    const metricas = this.getMetricas();
+    this.historicoRede.push({
+      timestamp: new Date(),
+      metricas,
+      pacotesRoteados: this.pacotesEnviados,
+      falhasOcorridas: this.logs.filter(l => l.tipo === 'ERROR').length,
+    });
+
+    // Mantém apenas últimos 100 snapshots
+    if (this.historicoRede.length > 100) {
+      this.historicoRede.shift();
+    }
+  }
+
+  getHistorico(): HistoricoRede[] {
+    return this.historicoRede;
+  }
+
+  getEstatisticasHistoricas(): {
+    latenciaMediaHistorica: number;
+    pacotesTotais: number;
+    taxaEntrega: number;
+    tempoMedioRota: number;
+  } {
+    const totalLatencia = this.historicoRede.reduce(
+      (acc, h) => acc + h.metricas.latenciaMedia, 0
+    );
+    
+    return {
+      latenciaMediaHistorica: this.historicoRede.length > 0 
+        ? totalLatencia / this.historicoRede.length 
+        : 0,
+      pacotesTotais: this.pacotesEnviados,
+      taxaEntrega: this.pacotesEnviados > 0 
+        ? (this.pacotesEntregues / this.pacotesEnviados) * 100 
+        : 0,
+      tempoMedioRota: this.pacotesHistorico
+        .filter(p => p.tempoFim)
+        .reduce((acc, p) => {
+          const tempo = p.tempoFim!.getTime() - p.tempoInicio.getTime();
+          return acc + tempo;
+        }, 0) / Math.max(1, this.pacotesEntregues),
+    };
   }
 
   // ============================================

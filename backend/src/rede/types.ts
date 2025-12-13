@@ -62,6 +62,9 @@ export interface Conexao {
   bandaUsada: number;
   perda: number;
   peso: number;
+  custo: number;                    // Custo monetário da conexão
+  estabilidade: number;             // 0-100% estabilidade
+  probabilidadeFalha: number;       // 0-100% chance de falha
   bidirecional: boolean;
   criadoEm: Date;
   atualizadoEm: Date;
@@ -112,6 +115,29 @@ export interface MetricasRede {
   throughputTotal: number;
   congestionamentos: number;
   tempoMedioRota: number;
+  caminhoMedioEntreNos: number;        // Menor caminho médio
+  dispositivosComprometidos: number;
+  ataquesAtivos: number;
+}
+
+export interface HistoricoRede {
+  timestamp: Date;
+  metricas: MetricasRede;
+  pacotesRoteados: number;
+  falhasOcorridas: number;
+}
+
+export interface RecomendacaoRota {
+  rotaOriginal: string[];
+  rotasAlternativas: ResultadoCaminho[];
+  motivoRecomendacao: string;
+}
+
+export interface SimulacaoBroadcast {
+  origem: string;
+  alcance: string[];
+  tempoTotal: number;
+  saltoMaximo: number;
 }
 
 export interface ResultadoCaminho {
@@ -156,7 +182,22 @@ export interface CriarConexaoDto {
   tipo: TipoConexao;
   latencia?: number;
   banda?: number;
+  custo?: number;
+  estabilidade?: number;
+  probabilidadeFalha?: number;
   bidirecional?: boolean;
+}
+
+export interface SimularQuedaEnergiaDto {
+  dispositivos: string[];
+}
+
+export interface AtualizarPesosDto {
+  conexaoId: string;
+  latencia?: number;
+  banda?: number;
+  custo?: number;
+  probabilidadeFalha?: number;
 }
 
 export interface EnviarPacoteDto {
