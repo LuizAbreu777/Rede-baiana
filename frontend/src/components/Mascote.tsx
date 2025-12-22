@@ -4,9 +4,10 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FaNetworkWired, FaQuestionCircle } from 'react-icons/fa';
 import { GiPalmTree } from 'react-icons/gi';
+import Image from 'next/image';
 
 const dicas = [
-  "Ô xente! Clique em um dispositivo pra ver mais detalhes!",
+  "Ôxente! Clique em um dispositivo pra ver mais detalhes!",
   "Tá ligado? Use o Dijkstra pra achar o melhor caminho!",
   "Eita! Simule falhas pra testar a resiliência da rede!",
   "Arretado! Arraste os dispositivos pra reorganizar o mapa!",
@@ -59,7 +60,13 @@ export function Mascote() {
         }}
       >
         <div className="w-full h-full rounded-full bg-gradient-to-br from-bahia-azul to-bahia-vermelho flex items-center justify-center overflow-hidden">
-          <FaNetworkWired className="w-8 h-8 text-white" />
+          <Image
+          src="/Mascote.png"
+          alt="Mascote do chatbot"
+          width={80}
+          height={80}
+          className="object-cover"
+          />
         </div>
         
         {/* Brilho */}
