@@ -21,7 +21,11 @@
   "devDependencies": {
     "concurrently": "^8.2.2"
   },
-  "author": "Equipe Rede Baiana",
+  "author": {
+    "name": "Luiz Fernando Mendes de Azevedo",
+    "email": "luiz.fma@gmail.com",
+    "url": "https://github.com/LuizAbreu777"
+  },
   "license": "MIT"
 }
 
