@@ -100,6 +100,8 @@ export interface Ataque {
   propagacao: boolean;
   ativo: boolean;
   iniciadoEm: Date;
+  // registro dos efeitos aplicados às conexões durante o ataque (usado para restaurar)
+  conexoesEfeitos?: Record<string, { latencia: number; perda: number; status: StatusConexao }>;
 }
 
 export interface MetricasRede {

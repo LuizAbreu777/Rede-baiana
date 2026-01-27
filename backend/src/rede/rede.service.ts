@@ -724,8 +724,32 @@ export class RedeService {
       this.pacotes.set(pacote.id, pacote);
       this.adicionarLog('INFO', `Pacote enviado de ${this.vertices.get(dto.origem)?.nome} para ${this.vertices.get(dto.destino)?.nome}`, resultado.caminho);
 
-      // Simula entrega
-      setTimeout(() => this.entregarPacote(pacote.id), resultado.latenciaEstimada * 100);
+      // Calcula probabilidade de perda com base nas conexões da rota
+      const rotasConexoes = resultado.caminho
+        .map((id, idx) => {
+          if (idx === resultado.caminho.length - 1) return null;
+          const origem = resultado.caminho[idx];
+          const destino = resultado.caminho[idx + 1];
+          // procura conexão entre origem->destino
+          const lista = this.adjacencias.get(origem);
+          if (!lista) return null;
+          const vizinho = lista.todosVizinhos().find(v => v.destinoId === destino);
+          return vizinho ? vizinho.conexao : null;
+        })
+        .filter(Boolean) as Conexao[];
+
+      // usa média de perda das conexões como chance de perda do pacote
+      const perdaMedia = rotasConexoes.length > 0 ? rotasConexoes.reduce((acc, c) => acc + (c.perda || 0), 0) / rotasConexoes.length : 0;
+
+      if (Math.random() * 100 < perdaMedia) {
+        // Pacote perdido devido à perda nas conexões (ex: DDOS)
+        pacote.status = 'PERDIDO';
+        this.pacotesPerdidos++;
+        this.adicionarLog('WARNING', `Pacote perdido em rota (perda média ${perdaMedia.toFixed(2)}%)`, resultado.caminho);
+      } else {
+        // Simula entrega
+        setTimeout(() => this.entregarPacote(pacote.id), resultado.latenciaEstimada * 100);
+      }
     } else {
       pacote.status = 'PERDIDO';
       this.pacotesPerdidos++;
@@ -789,6 +813,25 @@ export class RedeService {
             if (dispositivo.cargaAtual >= 90) {
               dispositivo.status = StatusDispositivo.CONGESTIONADO;
             }
+            // Efeitos em conexões: aumentar latência e perda proporcionalmente à intensidade
+            ataque.conexoesEfeitos = ataque.conexoesEfeitos || {};
+            const lista = this.adjacencias.get(alvoId);
+            if (lista) {
+              for (const vizinho of lista.todosVizinhos()) {
+                const conexao = vizinho.conexao;
+                // registra estado original
+                if (!ataque.conexoesEfeitos![conexao.id]) {
+                  ataque.conexoesEfeitos![conexao.id] = { latencia: conexao.latencia, perda: conexao.perda, status: conexao.status };
+                }
+                // aplica aumento: latencia += intensidade * fator; perda += intensidade * fatorPerda
+                const fatorLatencia = 0.1; // 10% da intensidade transforma em ms
+                const fatorPerda = 0.005; // 0.5% da intensidade em aumento de perda
+                conexao.latencia = conexao.latencia + Math.round(ataque.intensidade * fatorLatencia);
+                conexao.perda = Math.min(100, conexao.perda + ataque.intensidade * fatorPerda);
+                // marca conexão como congestionada se perda alta
+                if (conexao.perda >= 50) conexao.status = StatusConexao.CONGESTIONADA;
+              }
+            }
             break;
           case TipoAtaque.MALWARE:
           case TipoAtaque.MAN_IN_MIDDLE:
@@ -816,6 +859,19 @@ export class RedeService {
       if (dispositivo) {
         dispositivo.status = StatusDispositivo.ONLINE;
         dispositivo.cargaAtual = Math.max(0, dispositivo.cargaAtual - ataque.intensidade);
+      }
+    }
+
+    // Restaura efeitos em conexões caso tenhamos registrado alterações
+    if (ataque.conexoesEfeitos) {
+      for (const conexaoId of Object.keys(ataque.conexoesEfeitos)) {
+        const efeito = ataque.conexoesEfeitos[conexaoId];
+        const conexao = this.conexoes.get(conexaoId);
+        if (conexao) {
+          conexao.latencia = efeito.latencia;
+          conexao.perda = efeito.perda;
+          conexao.status = efeito.status;
+        }
       }
     }
 
