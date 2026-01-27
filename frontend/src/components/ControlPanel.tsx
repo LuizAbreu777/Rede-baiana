@@ -61,6 +61,8 @@ export function ControlPanel({
   const [origem, setOrigem] = useState('');
   const [destino, setDestino] = useState('');
   const [algoritmo, setAlgoritmo] = useState<'DIJKSTRA' | 'BFS' | 'DFS'>('DIJKSTRA');
+  // sorted devices for dropdowns
+  const sortedDispositivos = [...dispositivos].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
   const [resultadoCaminho, setResultadoCaminho] = useState<ResultadoCaminho | null>(null);
   const [tipoAtaque, setTipoAtaque] = useState<TipoAtaque>(TipoAtaque.DOS);
   const [intensidadeAtaque, setIntensidadeAtaque] = useState(50);
@@ -149,7 +151,7 @@ export function ControlPanel({
                   className="select"
                 >
                   <option value="">Selecione...</option>
-                  {dispositivos.map((d) => (
+                  {sortedDispositivos.map((d) => (
                     <option key={d.id} value={d.id}>
                       {d.nome}
                     </option>
@@ -164,7 +166,7 @@ export function ControlPanel({
                   className="select"
                 >
                   <option value="">Selecione...</option>
-                  {dispositivos.map((d) => (
+                  {sortedDispositivos.map((d) => (
                     <option key={d.id} value={d.id}>
                       {d.nome}
                     </option>
@@ -212,7 +214,7 @@ export function ControlPanel({
                   className="select"
                 >
                   <option value="">Selecione...</option>
-                  {dispositivos.map((d) => (
+                  {sortedDispositivos.map((d) => (
                     <option key={d.id} value={d.id}>
                       {d.nome}
                     </option>
@@ -227,7 +229,7 @@ export function ControlPanel({
                   className="select"
                 >
                   <option value="">Selecione...</option>
-                  {dispositivos.map((d) => (
+                  {sortedDispositivos.map((d) => (
                     <option key={d.id} value={d.id}>
                       {d.nome}
                     </option>
