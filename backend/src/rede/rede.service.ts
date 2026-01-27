@@ -724,13 +724,12 @@ export class RedeService {
       this.pacotes.set(pacote.id, pacote);
       this.adicionarLog('INFO', `Pacote enviado de ${this.vertices.get(dto.origem)?.nome} para ${this.vertices.get(dto.destino)?.nome}`, resultado.caminho);
 
-      // Calcula probabilidade de perda com base nas conexões da rota
-      const rotasConexoes = resultado.caminho
+      // Calcula probabilidade composta de perda ao longo da rota
+      const conexoesDaRota: Conexao[] = resultado.caminho
         .map((id, idx) => {
           if (idx === resultado.caminho.length - 1) return null;
           const origem = resultado.caminho[idx];
           const destino = resultado.caminho[idx + 1];
-          // procura conexão entre origem->destino
           const lista = this.adjacencias.get(origem);
           if (!lista) return null;
           const vizinho = lista.todosVizinhos().find(v => v.destinoId === destino);
@@ -738,16 +737,15 @@ export class RedeService {
         })
         .filter(Boolean) as Conexao[];
 
-      // usa média de perda das conexões como chance de perda do pacote
-      const perdaMedia = rotasConexoes.length > 0 ? rotasConexoes.reduce((acc, c) => acc + (c.perda || 0), 0) / rotasConexoes.length : 0;
+      // compound loss: 1 - product(1 - perda_i)
+      const perdaComposta = conexoesDaRota.reduce((acc, c) => acc * (1 - (c.perda || 0) / 100), 1);
+      const perdaPercent = (1 - perdaComposta) * 100;
 
-      if (Math.random() * 100 < perdaMedia) {
-        // Pacote perdido devido à perda nas conexões (ex: DDOS)
+      if (Math.random() * 100 < perdaPercent) {
         pacote.status = 'PERDIDO';
         this.pacotesPerdidos++;
-        this.adicionarLog('WARNING', `Pacote perdido em rota (perda média ${perdaMedia.toFixed(2)}%)`, resultado.caminho);
+        this.adicionarLog('WARNING', `Pacote perdido em rota (perda composta ${perdaPercent.toFixed(2)}%)`, resultado.caminho);
       } else {
-        // Simula entrega
         setTimeout(() => this.entregarPacote(pacote.id), resultado.latenciaEstimada * 100);
       }
     } else {
@@ -824,14 +822,16 @@ export class RedeService {
                   ataque.conexoesEfeitos![conexao.id] = { latencia: conexao.latencia, perda: conexao.perda, status: conexao.status };
                 }
                 // aplica aumento: latencia += intensidade * fator; perda += intensidade * fatorPerda
-                const fatorLatencia = 0.1; // ms increase per intensity unit
-                const fatorPerda = 0.005; // percentual loss increase per intensity unit
+                // amplified effects for visibility: increase latency and loss more strongly
+                const fatorLatencia = 0.5; // ms increase per intensity unit (was 0.1)
+                const fatorPerda = 0.2; // percentual loss increase per intensity unit (was 0.005)
                 const latenciaOriginal = conexao.latencia;
                 conexao.latencia = conexao.latencia + Math.round(ataque.intensidade * fatorLatencia);
+                // increase loss but keep within 0-100
                 conexao.perda = Math.min(100, conexao.perda + ataque.intensidade * fatorPerda);
-                // marca conexão como congestionada se perda alta ou latência aumentou bastante
-                const latenciaThreshold = 10; // ms
-                if (conexao.perda >= 50 || (conexao.latencia - latenciaOriginal) >= latenciaThreshold) {
+                // mark connection congested if loss high or latency jumped above threshold
+                const latenciaThreshold = 15; // ms (higher threshold but larger latency increments now)
+                if (conexao.perda >= 40 || (conexao.latencia - latenciaOriginal) >= latenciaThreshold) {
                   conexao.status = StatusConexao.CONGESTIONADA;
                 }
               }
