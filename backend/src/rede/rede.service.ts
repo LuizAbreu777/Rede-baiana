@@ -824,12 +824,16 @@ export class RedeService {
                   ataque.conexoesEfeitos![conexao.id] = { latencia: conexao.latencia, perda: conexao.perda, status: conexao.status };
                 }
                 // aplica aumento: latencia += intensidade * fator; perda += intensidade * fatorPerda
-                const fatorLatencia = 0.1; // 10% da intensidade transforma em ms
-                const fatorPerda = 0.005; // 0.5% da intensidade em aumento de perda
+                const fatorLatencia = 0.1; // ms increase per intensity unit
+                const fatorPerda = 0.005; // percentual loss increase per intensity unit
+                const latenciaOriginal = conexao.latencia;
                 conexao.latencia = conexao.latencia + Math.round(ataque.intensidade * fatorLatencia);
                 conexao.perda = Math.min(100, conexao.perda + ataque.intensidade * fatorPerda);
-                // marca conexão como congestionada se perda alta
-                if (conexao.perda >= 50) conexao.status = StatusConexao.CONGESTIONADA;
+                // marca conexão como congestionada se perda alta ou latência aumentou bastante
+                const latenciaThreshold = 10; // ms
+                if (conexao.perda >= 50 || (conexao.latencia - latenciaOriginal) >= latenciaThreshold) {
+                  conexao.status = StatusConexao.CONGESTIONADA;
+                }
               }
             }
             break;
