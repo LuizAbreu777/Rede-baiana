@@ -91,6 +91,8 @@ export interface Ataque {
   propagacao: boolean;
   ativo: boolean;
   iniciadoEm: Date;
+  // optional record of original connection effects (backend may include this)
+  conexoesEfeitos?: Record<string, { latencia: number; perda: number; status: StatusConexao }>;
 }
 
 export interface MetricasRede {

@@ -359,22 +359,31 @@ export function ControlPanel({
                   </span>
                 </div>
                 <div className="space-y-2">
-                  {ataques.map((ataque) => (
-                    <div key={ataque.id} className="flex items-center justify-between p-2 rounded bg-white/5">
-                      <div className="text-xs">
-                        <span className="text-red-300 font-medium">{ataque.tipo}</span>
-                        <span className="text-white/50 ml-2">
-                          {ataque.alvos.length} alvo(s) | {ataque.intensidade}%
-                        </span>
+                  {ataques.map((ataque) => {
+                    const efeitos = ataque.conexoesEfeitos ? Object.values(ataque.conexoesEfeitos) : [];
+                    const affectedCount = efeitos.length;
+                    const avgOriginalPerda = efeitos.length > 0 ? (efeitos.reduce((acc, e) => acc + (e.perda || 0), 0) / efeitos.length) : 0;
+
+                    return (
+                      <div key={ataque.id} className="flex items-center justify-between p-2 rounded bg-white/5">
+                        <div className="text-xs">
+                          <span className="text-red-300 font-medium">{ataque.tipo}</span>
+                          <span className="text-white/50 ml-2">
+                            {ataque.alvos.length} alvo(s) | {ataque.intensidade}%
+                          </span>
+                          <div className="text-white/40 text-[11px] mt-1">
+                            Affected connections: {affectedCount} • Original avg loss: {avgOriginalPerda.toFixed(1)}%
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => onPararAtaque(ataque.id)}
+                          className="btn btn-ghost text-xs py-1 px-2 text-green-400 hover:text-green-300"
+                        >
+                          <BiShield className="w-3 h-3" /> Neutralizar
+                        </button>
                       </div>
-                      <button
-                        onClick={() => onPararAtaque(ataque.id)}
-                        className="btn btn-ghost text-xs py-1 px-2 text-green-400 hover:text-green-300"
-                      >
-                        <BiShield className="w-3 h-3" /> Neutralizar
-                      </button>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}

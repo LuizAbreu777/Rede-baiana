@@ -557,6 +557,7 @@ export function NetworkCanvas({
 
             const isHighlighted = conexaoDestacada(conexao);
             const isActive = conexao.status === StatusConexao.ATIVA;
+            const isCongestionada = conexao.status === StatusConexao.CONGESTIONADA;
             const canDelete = ferramentaAtiva === 'delete';
             
             return (
@@ -582,8 +583,8 @@ export function NetworkCanvas({
                   y1={origem.y}
                   x2={destino.x}
                   y2={destino.y}
-                  stroke={isHighlighted ? 'url(#highlightGradient)' : isActive ? 'url(#connectionGradient)' : '#4B5563'}
-                  strokeWidth={isHighlighted ? 4 : 2}
+                  stroke={isHighlighted ? 'url(#highlightGradient)' : isCongestionada ? '#F59E0B' : isActive ? 'url(#connectionGradient)' : '#4B5563'}
+                  strokeWidth={isHighlighted ? 4 : isCongestionada ? 4 : 2}
                   strokeDasharray={!isActive ? '5,5' : undefined}
                   filter={isHighlighted ? 'url(#glow)' : undefined}
                   className={`transition-all duration-300 ${canDelete ? 'hover:stroke-red-500' : ''}`}
